@@ -188,6 +188,29 @@ class HidenCloudBot:
     def get_cookie_str(self):
         return '; '.join([f"{c.name}={c.value}" for c in self.session.cookies])
 
+    def find_cookie_value(self, *names, preferred_domain=''):
+        matches = []
+        target_names = set(names)
+
+        for cookie in self.session.cookies:
+            if cookie.name in target_names and cookie.value:
+                matches.append(cookie)
+
+        if not matches:
+            return ""
+
+        if preferred_domain:
+            domain_matches = [
+                cookie for cookie in matches
+                if cookie.domain and preferred_domain in cookie.domain
+            ]
+            if domain_matches:
+                matches = domain_matches
+
+        # requests 在同名 cookie 上可能抛 CookieConflictError，这里手动挑一个最合适的值。
+        matches.sort(key=lambda cookie: (len(cookie.domain or ''), len(cookie.path or '')))
+        return matches[-1].value
+
     def save_cookies(self, upload=True):
         """由关键操作节点显式调用，而非每次请求都触发。"""
         CacheManager.update(self.index - 1, self.get_cookie_str(), upload=upload)
@@ -307,10 +330,11 @@ class HidenCloudBot:
         payload['days'] = RENEW_DAYS
 
         target_url = action_url or self.normalize_url(f"/service/{service_id}/renew")
-        xsrf_cookie = (
-            self.session.cookies.get('XSRF-TOKEN')
-            or self.session.cookies.get('XSRF_TOKEN')
-            or self.session.cookies.get('csrf_token')
+        xsrf_cookie = self.find_cookie_value(
+            'XSRF-TOKEN',
+            'XSRF_TOKEN',
+            'csrf_token',
+            preferred_domain='dash.hidencloud.com'
         )
         headers = {
             'X-CSRF-TOKEN': self.csrf_token,
